@@ -9,6 +9,8 @@ set -euo pipefail
 # - Requires Xcode Command Line Tools (xcodebuild)
 
 ROOT_DIR=$(pwd)
+# Optional revision from first CLI arg (tag or commit SHA)
+REQUESTED_REV="${1:-}"
 SRC_DIR="$ROOT_DIR"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/Build}"
 CONFIG="${CONFIGURATION:-Release}"
@@ -43,9 +45,11 @@ run_xcodebuild() {
 }
 
 # 1) Ensure source layout: XADMaster and UniversalDetector must be siblings
+JUST_CLONED=0
 if [ ! -d XADMaster ]; then
   echo "==> Cloning XADMaster..."
   git clone --depth=1 "$REPO_XAD" XADMaster
+  JUST_CLONED=1
 else
   echo "==> Found existing XADMaster sources; skipping update."
 fi
@@ -70,6 +74,29 @@ MAC_X64_LIB="$DERIVED_MAC_X64/Build/Products/$CONFIG/libXADMaster.a"
 MAC_UNI_LIB_DIR="$OUT_DIR/Universal-macos-lib"
 MAC_UNI_LIB="$MAC_UNI_LIB_DIR/libXADMaster.a"
 MAC_FINAL_LIB=""
+
+# If a revision is provided, try to checkout XADMaster to that revision
+if [ -n "$REQUESTED_REV" ]; then
+  if [ "$JUST_CLONED" = "1" ]; then
+    echo "==> Resolving XADMaster revision: $REQUESTED_REV"
+    # Try to fetch the specific tag/commit for newly cloned repo to ensure it exists locally
+    git -C XADMaster fetch --tags --depth=1 origin "$REQUESTED_REV" >/dev/null 2>&1 || true
+    if git -C XADMaster rev-parse --verify --quiet "$REQUESTED_REV^{commit}"; then
+      git -C XADMaster checkout -q "$REQUESTED_REV"
+      echo "==> Checked out XADMaster at: $REQUESTED_REV"
+    else
+      echo "warn: revision '$REQUESTED_REV' not found after clone; using default branch HEAD."
+    fi
+  else
+    echo "==> Attempting checkout of XADMaster at: $REQUESTED_REV (no fetch)"
+    if git -C XADMaster rev-parse --verify --quiet "$REQUESTED_REV^{commit}"; then
+      git -C XADMaster checkout -q "$REQUESTED_REV"
+      echo "==> Checked out XADMaster at: $REQUESTED_REV"
+    else
+      echo "warn: revision '$REQUESTED_REV' not present locally; keeping current revision."
+    fi
+  fi
+fi
 
 echo "==> Cleaning previous build artifacts..."
 rm -rf "$OUT_DIR/XADMaster.xcframework" "$DERIVED_MAC_ARM64" "$DERIVED_MAC_X64" "$MAC_UNI_LIB_DIR"

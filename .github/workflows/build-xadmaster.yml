@@ -3,12 +3,11 @@ name: Build XADMaster.xcframework
 on:
   push:
     branches: [ "master" ]
-  # Allow manual trigger as well
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-15
 
     steps:
       - name: Checkout repository
@@ -18,6 +17,9 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+      
+      - name: Install xcpretty
+        run: gem install xcpretty
 
       - name: Build XADMaster.xcframework
         env:

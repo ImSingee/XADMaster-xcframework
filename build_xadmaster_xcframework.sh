@@ -62,18 +62,16 @@ else
 fi
 
 PROJ="XADMaster/XADMaster.xcodeproj"
-SCHEME_MAC_FRAMEWORK="XADMaster"
-SCHEME_MAC_LIB="libXADMaster.a"
-SCHEME_IOS_LIB="libXADMaster.ios.a"
+SCHEME_MAC_FRAMEWORK="XADMaster"           # macOS Framework target (exists upstream)
+SCHEME_MAC_LIB="libXADMaster.a"            # macOS static lib target (legacy)
+SCHEME_IOS_LIB="libXADMaster.ios.a"        # iOS static lib target (upstream has no iOS framework)
 
 DERIVED_MAC_ARM64="$OUT_DIR/DerivedData-macos-arm64"
 DERIVED_MAC_X64="$OUT_DIR/DerivedData-macos-x86_64"
 
-MAC_ARM64_LIB="$DERIVED_MAC_ARM64/Build/Products/$CONFIG/libXADMaster.a"
-MAC_X64_LIB="$DERIVED_MAC_X64/Build/Products/$CONFIG/libXADMaster.a"
-MAC_UNI_LIB_DIR="$OUT_DIR/Universal-macos-lib"
-MAC_UNI_LIB="$MAC_UNI_LIB_DIR/libXADMaster.a"
-MAC_FINAL_LIB=""
+# macOS framework outputs
+MAC_ARM64_FRAMEWORK="$DERIVED_MAC_ARM64/Build/Products/$CONFIG/XADMaster.framework"
+MAC_X64_FRAMEWORK="$DERIVED_MAC_X64/Build/Products/$CONFIG/XADMaster.framework"
 
 # If a revision is provided, try to checkout XADMaster to that revision
 if [ -n "$REQUESTED_REV" ]; then
@@ -102,31 +100,16 @@ if [ -n "$REQUESTED_REV" ]; then
 fi
 
 echo "==> Cleaning previous build artifacts..."
-rm -rf "$OUT_DIR/XADMaster.xcframework" "$DERIVED_MAC_ARM64" "$DERIVED_MAC_X64" "$MAC_UNI_LIB_DIR"
+rm -rf "$OUT_DIR/XADMaster.xcframework" "$DERIVED_MAC_ARM64" "$DERIVED_MAC_X64"
 
-# Prepare a shared headers directory for all slices
-HEADERS_DIR="$OUT_DIR/Headers-XADMaster"
-rm -rf "$HEADERS_DIR" && mkdir -p "$HEADERS_DIR"
-rsync -a --include='*/' --include='*.h' --exclude='*' XADMaster/ "$HEADERS_DIR/"
-# Include UniversalDetector headers as well, to satisfy public headers dependency
-rsync -a --include='*.h' --exclude='*' UniversalDetector/ "$HEADERS_DIR/" || true
-
-# Optionally generate a modulemap so Swift can `import XADMaster`
-if [[ "${GENERATE_MODULEMAP:-1}" == "1" ]]; then
-  cat >"$HEADERS_DIR/module.modulemap" <<'MM'
-module XADMaster {
-  umbrella "."
-  export *
-  module * { export * }
-}
-MM
-fi
-
-# 2) Build macOS static library - arm64
-echo "==> Building macOS static library (arm64)..."
+########################################
+# macOS slice: build Framework (.framework)
+########################################
+# We use the upstream macOS framework target so the macOS slice isn’t a .a
+echo "==> Building macOS framework (arm64)..."
 run_xcodebuild \
   -project "$PROJ" \
-  -scheme "$SCHEME_MAC_LIB" \
+  -scheme "$SCHEME_MAC_FRAMEWORK" \
   -configuration "$CONFIG" \
   -sdk macosx \
   -derivedDataPath "$DERIVED_MAC_ARM64" \
@@ -136,14 +119,13 @@ run_xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   MACOSX_DEPLOYMENT_TARGET=10.13 \
   build
-[ -f "$MAC_ARM64_LIB" ] || { echo "error: macOS arm64 static library not found: $MAC_ARM64_LIB" >&2; exit 1; }
+[ -d "$MAC_ARM64_FRAMEWORK" ] || { echo "error: macOS arm64 framework not found: $MAC_ARM64_FRAMEWORK" >&2; exit 1; }
 
-# 3) Optionally build macOS static library - x86_64, then merge with arm64
 if [[ "${INCLUDE_MACOS_X86_64:-0}" == "1" ]]; then
-  echo "==> Building macOS static library (x86_64)..."
+  echo "==> Building macOS framework (x86_64)..."
   run_xcodebuild \
     -project "$PROJ" \
-    -scheme "$SCHEME_MAC_LIB" \
+    -scheme "$SCHEME_MAC_FRAMEWORK" \
     -configuration "$CONFIG" \
     -sdk macosx \
     -derivedDataPath "$DERIVED_MAC_X64" \
@@ -153,18 +135,32 @@ if [[ "${INCLUDE_MACOS_X86_64:-0}" == "1" ]]; then
     CODE_SIGNING_REQUIRED=NO \
     MACOSX_DEPLOYMENT_TARGET=10.13 \
     build
-  [ -f "$MAC_X64_LIB" ] || { echo "error: macOS x86_64 static library not found: $MAC_X64_LIB" >&2; exit 1; }
-
-  echo "==> Merging macOS static libraries into a universal binary..."
-  mkdir -p "$MAC_UNI_LIB_DIR"
-  "/usr/bin/lipo" -create "$MAC_ARM64_LIB" "$MAC_X64_LIB" -output "$MAC_UNI_LIB"
-  MAC_FINAL_LIB="$MAC_UNI_LIB"
-else
-  MAC_FINAL_LIB="$MAC_ARM64_LIB"
+  [ -d "$MAC_X64_FRAMEWORK" ] || { echo "error: macOS x86_64 framework not found: $MAC_X64_FRAMEWORK" >&2; exit 1; }
 fi
 
-# 4) Compose base xcframework (macOS static lib: arm64 by default, universal if enabled)
-CMD_CREATE=( xcodebuild -create-xcframework -library "$MAC_FINAL_LIB" -headers "$OUT_DIR/Headers-XADMaster" )
+# Start compose command with the macOS framework(s)
+CMD_CREATE=( xcodebuild -create-xcframework -framework "$MAC_ARM64_FRAMEWORK" )
+if [[ "${INCLUDE_MACOS_X86_64:-0}" == "1" ]]; then
+  CMD_CREATE+=( -framework "$MAC_X64_FRAMEWORK" )
+fi
+
+# Prepare a shared headers directory for static-lib slices (iOS/Catalyst)
+HEADERS_DIR="$OUT_DIR/Headers-XADMaster"
+rm -rf "$HEADERS_DIR" && mkdir -p "$HEADERS_DIR"
+rsync -a --include='*/' --include='*.h' --exclude='*' XADMaster/ "$HEADERS_DIR/"
+# Include UniversalDetector headers as well, to satisfy public headers dependency
+rsync -a --include='*.h' --exclude='*' UniversalDetector/ "$HEADERS_DIR/" || true
+
+# Optionally generate a modulemap so Swift can `import XADMaster` (for static-lib slices)
+if [[ "${GENERATE_MODULEMAP:-1}" == "1" ]]; then
+  cat >"$HEADERS_DIR/module.modulemap" <<'MM'
+module XADMaster {
+  umbrella "."
+  export *
+  module * { export * }
+}
+MM
+fi
 
 # 6) iOS static libraries (device + simulator), then add -library entries
 if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
@@ -245,9 +241,85 @@ if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
     cp "$IOS_SIM_ARM64_LIB" "$IOS_SIM_UNI_LIB"
   fi
 
-  # Add iOS device + simulator fat library to create-xcframework command
-  CMD_CREATE+=( -library "$IOS_DEV_LIB" -headers "$HEADERS_DIR" )
-  CMD_CREATE+=( -library "$IOS_SIM_UNI_LIB" -headers "$HEADERS_DIR" )
+  # Wrap iOS static libs into static frameworks so the xcframework contains frameworks only
+  echo "==> Wrapping iOS static libs into .framework bundles..."
+  STAGING_FW="$OUT_DIR/FrameworkStaging"
+  IOS_DEV_FW="$STAGING_FW/iOS-device/XADMaster.framework"
+  IOS_SIM_FW="$STAGING_FW/iOS-simulator/XADMaster.framework"
+  rm -rf "$STAGING_FW" && mkdir -p "$IOS_DEV_FW/Headers" "$IOS_DEV_FW/Modules" "$IOS_SIM_FW/Headers" "$IOS_SIM_FW/Modules"
+
+  # Copy headers into both frameworks
+  rsync -a "$HEADERS_DIR/" "$IOS_DEV_FW/Headers/"
+  rsync -a "$HEADERS_DIR/" "$IOS_SIM_FW/Headers/"
+
+  # Install binary (use same name as framework)
+  cp "$IOS_DEV_LIB" "$IOS_DEV_FW/XADMaster"
+  cp "$IOS_SIM_UNI_LIB" "$IOS_SIM_FW/XADMaster"
+
+  # Minimal modulemap for frameworks
+  cat >"$IOS_DEV_FW/Modules/module.modulemap" <<'MM'
+module XADMaster {
+  umbrella header "XADMaster.h"
+  export *
+  module * { export * }
+}
+MM
+  cp "$IOS_DEV_FW/Modules/module.modulemap" "$IOS_SIM_FW/Modules/module.modulemap"
+
+  # Minimal Info.plist files with supported platforms
+  cat >"$IOS_DEV_FW/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.macpaw.XADMaster</string>
+  <key>CFBundleName</key>
+  <string>XADMaster</string>
+  <key>CFBundlePackageType</key>
+  <string>FMWK</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array>
+    <string>iPhoneOS</string>
+  </array>
+</dict>
+</plist>
+PLIST
+
+  cat >"$IOS_SIM_FW/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.macpaw.XADMaster</string>
+  <key>CFBundleName</key>
+  <string>XADMaster</string>
+  <key>CFBundlePackageType</key>
+  <string>FMWK</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array>
+    <string>iPhoneSimulator</string>
+  </array>
+</dict>
+</plist>
+PLIST
+
+  # Add iOS frameworks instead of libraries
+  CMD_CREATE+=( -framework "$IOS_DEV_FW" )
+  CMD_CREATE+=( -framework "$IOS_SIM_FW" )
 
   # Optionally build and include Mac Catalyst (disabled by default)
   if [[ "${INCLUDE_CATALYST:-0}" == "1" ]]; then
@@ -267,10 +339,46 @@ if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
       build
     CAT_LIB="$DERIVED_CAT/Build/Products/Release-maccatalyst/libXADMaster.ios.a"
     if [[ -f "$CAT_LIB" ]]; then
-      CMD_CREATE+=( -library "$CAT_LIB" -headers "$HEADERS_DIR" )
+      echo "==> Wrapping Mac Catalyst static lib into .framework..."
+      CAT_FW="$STAGING_FW/maccatalyst/XADMaster.framework"
+      rm -rf "$CAT_FW" && mkdir -p "$CAT_FW/Headers" "$CAT_FW/Modules"
+      rsync -a "$HEADERS_DIR/" "$CAT_FW/Headers/"
+      cp "$CAT_LIB" "$CAT_FW/XADMaster"
+      cat >"$CAT_FW/Modules/module.modulemap" <<'MM'
+module XADMaster {
+  umbrella header "XADMaster.h"
+  export *
+  module * { export * }
+}
+MM
+      cat >"$CAT_FW/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.macpaw.XADMaster</string>
+  <key>CFBundleName</key>
+  <string>XADMaster</string>
+  <key>CFBundlePackageType</key>
+  <string>FMWK</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array>
+    <string>MacOSX</string>
+  </array>
+</dict>
+</plist>
+PLIST
+      CMD_CREATE+=( -framework "$CAT_FW" )
     else
       echo "warn: Mac Catalyst static library not found; skipping."
-fi
+    fi
   fi
 fi
 

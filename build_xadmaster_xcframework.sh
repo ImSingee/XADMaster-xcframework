@@ -25,6 +25,23 @@ fi
 
 cd "$SRC_DIR"
 
+# Detect xcpretty
+USE_XCPRETTY=0
+if command -v xcpretty >/dev/null 2>&1; then
+  USE_XCPRETTY=1
+  echo "==> Using xcpretty for build logs."
+else
+  echo "==> xcpretty not found; showing raw xcodebuild output."
+fi
+
+run_xcodebuild() {
+  if [ "$USE_XCPRETTY" = "1" ]; then
+    xcodebuild "$@" | xcpretty
+  else
+    xcodebuild "$@"
+  fi
+}
+
 # 1) Ensure source layout: XADMaster and UniversalDetector must be siblings
 if [ ! -d XADMaster ]; then
   echo "==> Cloning XADMaster..."
@@ -77,7 +94,7 @@ fi
 
 # 2) Build macOS static library - arm64
 echo "==> Building macOS static library (arm64)..."
-xcodebuild \
+run_xcodebuild \
   -project "$PROJ" \
   -scheme "$SCHEME_MAC_LIB" \
   -configuration "$CONFIG" \
@@ -94,7 +111,7 @@ xcodebuild \
 # 3) Optionally build macOS static library - x86_64, then merge with arm64
 if [[ "${INCLUDE_MACOS_X86_64:-0}" == "1" ]]; then
   echo "==> Building macOS static library (x86_64)..."
-  xcodebuild \
+  run_xcodebuild \
     -project "$PROJ" \
     -scheme "$SCHEME_MAC_LIB" \
     -configuration "$CONFIG" \
@@ -128,7 +145,7 @@ if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
   rm -rf "$DERIVED_IOS_DEV" "$DERIVED_IOS_SIM_ARM64" "$DERIVED_IOS_SIM_X64"
 
   # iOS (arm64) - device
-  xcodebuild \
+  run_xcodebuild \
     -project "$PROJ" \
     -scheme "$SCHEME_IOS_LIB" \
     -configuration "$CONFIG" \
@@ -145,7 +162,7 @@ if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
   [[ -f "$IOS_DEV_LIB" ]] || { echo "error: iOS device static library not found: $IOS_DEV_LIB" >&2; exit 1; }
 
   # iOS Simulator (arm64)
-  xcodebuild \
+  run_xcodebuild \
     -project "$PROJ" \
     -scheme "$SCHEME_IOS_LIB" \
     -configuration "$CONFIG" \
@@ -165,7 +182,7 @@ if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
   IOS_SIM_X64_LIB=""
   if xcodebuild -version >/dev/null 2>&1; then
     set +e
-    xcodebuild \
+    run_xcodebuild \
       -project "$PROJ" \
       -scheme "$SCHEME_IOS_LIB" \
       -configuration "$CONFIG" \
@@ -207,7 +224,7 @@ if [[ "${INCLUDE_IOS:-1}" == "1" ]]; then
     echo "==> Building Mac Catalyst static library..."
     DERIVED_CAT="$OUT_DIR/DerivedData-maccatalyst"
     rm -rf "$DERIVED_CAT"
-    xcodebuild \
+    run_xcodebuild \
       -project "$PROJ" \
       -scheme "$SCHEME_IOS_LIB" \
       -configuration "$CONFIG" \

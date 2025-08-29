@@ -24,8 +24,6 @@ jobs:
       - name: Build XADMaster.xcframework
         env:
           CONFIGURATION: Release
-          # Defaults: macOS arm64 + iOS (device + simulator)
-          # Set to "1" to include more slices if desired.
           INCLUDE_MACOS_X86_64: "0"
           INCLUDE_CATALYST: "0"
           GENERATE_MODULEMAP: "1"
@@ -50,16 +48,16 @@ jobs:
           fi
 
           echo "Zipping xcframework for upload…"
-          ARTIFACT_ZIP="XADMaster-${GITHUB_REF_NAME}-${GITHUB_SHA:0:7}.xcframework.zip"
+          ARTIFACT_ZIP="XADMaster.xcframework.zip"
           ditto -c -k --sequesterRsrc --keepParent Build/XADMaster.xcframework "$ARTIFACT_ZIP"
           echo "Created artifact $ARTIFACT_ZIP"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: XADMaster.xcframework-${{ github.ref_name }}-${{ github.sha }}
+          name: XADMaster.xcframework
           path: |
-            XADMaster-*.xcframework.zip
+            XADMaster.xcframework.zip
           if-no-files-found: error
           compression-level: 0 # already zipped
 

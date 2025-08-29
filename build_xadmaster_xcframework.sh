@@ -85,7 +85,8 @@ if [ -n "$REQUESTED_REV" ]; then
       git -C XADMaster checkout -q "$REQUESTED_REV"
       echo "==> Checked out XADMaster at: $REQUESTED_REV"
     else
-      echo "warn: revision '$REQUESTED_REV' not found after clone; using default branch HEAD."
+      echo "error: revision '$REQUESTED_REV' not found in origin (after clone)." >&2
+      exit 1
     fi
   else
     echo "==> Attempting checkout of XADMaster at: $REQUESTED_REV (no fetch)"
@@ -93,7 +94,9 @@ if [ -n "$REQUESTED_REV" ]; then
       git -C XADMaster checkout -q "$REQUESTED_REV"
       echo "==> Checked out XADMaster at: $REQUESTED_REV"
     else
-      echo "warn: revision '$REQUESTED_REV' not present locally; keeping current revision."
+      echo "error: revision '$REQUESTED_REV' not present in local XADMaster repository." >&2
+      echo "hint: remove the 'XADMaster' directory to allow fresh clone, or fetch the revision manually." >&2
+      exit 1
     fi
   fi
 fi

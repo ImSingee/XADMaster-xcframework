@@ -47,17 +47,11 @@ jobs:
             exit 1
           fi
 
-          echo "Zipping xcframework for upload…"
-          ARTIFACT_ZIP="XADMaster.xcframework.zip"
-          ditto -c -k --sequesterRsrc --keepParent Build/XADMaster.xcframework "$ARTIFACT_ZIP"
-          echo "Created artifact $ARTIFACT_ZIP"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: XADMaster.xcframework
           path: |
-            XADMaster.xcframework.zip
+            Build/XADMaster.xcframework*
           if-no-files-found: error
-          compression-level: 0 # already zipped
 

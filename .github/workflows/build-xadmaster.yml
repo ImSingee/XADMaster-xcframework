@@ -1,0 +1,63 @@
+name: Build XADMaster.xcframework
+
+on:
+  push:
+    branches: [ "master" ]
+  # Allow manual trigger as well
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build XADMaster.xcframework
+        env:
+          CONFIGURATION: Release
+          # Defaults: macOS arm64 + iOS (device + simulator)
+          # Set to "1" to include more slices if desired.
+          INCLUDE_MACOS_X86_64: "0"
+          INCLUDE_CATALYST: "0"
+          GENERATE_MODULEMAP: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "./build_xadmaster_xcframework.sh" ]]; then
+            echo "ERROR: build_xadmaster_xcframework.sh not found at repo root." >&2
+            exit 1
+          fi
+
+          echo "Making build script executable…"
+          chmod +x ./build_xadmaster_xcframework.sh
+
+          echo "Starting build…"
+          ./build_xadmaster_xcframework.sh
+
+          if [[ ! -d Build/XADMaster.xcframework ]]; then
+            echo "ERROR: Build/XADMaster.xcframework not found after build." >&2
+            exit 1
+          fi
+
+          echo "Zipping xcframework for upload…"
+          ARTIFACT_ZIP="XADMaster-${GITHUB_REF_NAME}-${GITHUB_SHA:0:7}.xcframework.zip"
+          ditto -c -k --sequesterRsrc --keepParent Build/XADMaster.xcframework "$ARTIFACT_ZIP"
+          echo "Created artifact $ARTIFACT_ZIP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XADMaster.xcframework-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            XADMaster-*.xcframework.zip
+          if-no-files-found: error
+          compression-level: 0 # already zipped
+
